@@ -204,24 +204,3 @@ exports.followUser = async (req, res, next) => {
     }
 };
 
-exports.getPostOfFollowing = async (req,res) => {
-    try {
-        const user = await User.findById(req.user._id)
-
-        const post = await Post.find({
-            owner: {
-                $in: user.following
-            }
-        })
-
-        res.status(200).json({
-            success: true,
-            post,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-        })
-    }
-}
