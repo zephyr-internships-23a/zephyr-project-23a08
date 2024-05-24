@@ -9,4 +9,6 @@ router.route("/post/upload").post(isAuthenticated,createPost)
 router.route("/post/:postId").get(isAuthenticated,likeAndunlikePost).put(isAuthenticated,updateCaption).delete(isAuthenticated,deletePost)
 router.route("/post").get(isAuthenticated,getPostOfFollowing)
 
+//commentOnPost,deletePost *pending*
+
 module.exports = router;

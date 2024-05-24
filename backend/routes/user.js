@@ -18,4 +18,6 @@ router.route("/update/profile").put(isAuthenticated, updateProfile);
 
 router.route("/delete/me").delete(isAuthenticated,deleteMyProfile);
 
+//myProfile,
+
 module.exports = router;
