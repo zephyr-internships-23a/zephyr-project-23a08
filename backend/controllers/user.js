@@ -1,20 +1,66 @@
 const Post = require('../Model/Post');
 const User = require('../Model/User');
+const {sendEmail} = require("../middlewares/sendEmail")
+const crypto = require("crypto");
+const cloudinary = require("cloudinary");
 
-exports.register = async (req, res, next) => {
-    try {
-        const{name, email, password} = req.body;
-        let user = await User.findOne({email});
-        if (user) {
-            return res.status(400).json({
-                sucess: false,
-                message: 'Email already exists'
-            });
-        }
+// exports.register = async (req, res, next) => {
+//     try {
+//         const{name, email, password} = req.body;
+//         let user = await User.findOne({email});
+//         if (user) {
+//             return res.status(400).json({
+//                 sucess: false,
+//                 message: 'Email already exists'
+//             });
+//         }
 
-        user = await User.create({name, email, password, avatar: {public_id: 'sample_id', url: 'sampple_url'}
-        });
-        const token = await user.getJwtToken();
+//         user = await User.create({name, email, password, avatar: {public_id: 'sample_id', url: 'sampple_url'}
+//         });
+//         const token = await user.getJwtToken();
+
+//         const options = {
+//             expires: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+//             httpOnly: true
+//         };
+
+//         res.status(201).cookie("token",token,options).json({
+//             sucess: true,
+//             message: 'User logged in successfully',
+//             user
+//         });
+            
+//         } catch (error) {
+//         res.status(500).json({ 
+//             sucess: false,
+//             message: error.message 
+//         });
+//     }
+// };
+
+exports.register = async (req, res) => {
+  try {
+    const { name, email, password, avatar } = req.body;
+
+    let user = await User.findOne({ email });
+    if (user) {
+      return res
+        .status(400)
+        .json({ success: false, message: "User already exists" });
+    }
+
+    const myCloud = await cloudinary.v2.uploader.upload(avatar, {
+      folder: "avatars",
+    });
+
+    user = await User.create({
+      name,
+      email,
+      password,
+      avatar: { public_id: myCloud.public_id, url: myCloud.secure_url },
+    });
+
+    const token = await user.getJwtToken();
 
         const options = {
             expires: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
@@ -39,7 +85,7 @@ exports.login = async (req, res, next) => {
     try {
         const {email, password} = req.body;
 
-        const user = await User.findOne({email}).select('+password');
+        const user = await User.findOne({email}).select('+password').populate("posts followers following");
 
         if (!user) {
             return res.status(404).json({
@@ -139,11 +185,18 @@ exports.updatePassword = async (req, res) => {
       if (email) {
         user.email = email;
       }
+
+      if (avatar) {
+        await cloudinary.v2.uploader.destroy(user.avatar.public_id);
   
-    //   if (avatar) {
-        
-    //   }
+        const myCloud = await cloudinary.v2.uploader.upload(avatar, {
+          folder: "avatars",
+        });
+        user.avatar.public_id = myCloud.public_id;
+        user.avatar.url = myCloud.secure_url;
+      }
   
+
       await user.save();
   
       res.status(200).json({
@@ -277,6 +330,204 @@ exports.deleteMyProfile = async (req, res) => {
       res.status(200).json({
         success: true,
         message: "Profile Deleted",
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+
+  exports.myProfile = async (req, res) => {
+    try {
+      const user = await User.findById(req.user._id).populate(
+        "posts followers following"
+      );
+  
+      res.status(200).json({
+        success: true,
+        user,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+  
+  exports.getUserProfile = async (req, res) => {
+    try {
+      const user = await User.findById(req.params.id).populate(
+        "posts followers following"
+      );
+  
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+  
+      res.status(200).json({
+        success: true,
+        user,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+
+  exports.getAllUsers = async (req, res) => {
+    try {
+      const users = await User.find({
+        name: { $regex: req.query.name, $options: "i" },
+      });
+  
+      res.status(200).json({
+        success: true,
+        users,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+
+  exports.forgotPassword = async (req, res) => {
+    try {
+      const user = await User.findOne({ email: req.body.email });
+  
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+  
+      const resetPasswordToken = user.getResetPasswordToken();
+  
+      await user.save();
+  
+      const resetUrl = `${req.protocol}://${req.get(
+        "host"
+      )}/password/reset/${resetPasswordToken}`;
+  
+      const message = `Reset Your Password by clicking on the link below: \n\n ${resetUrl}`;
+  
+      try {
+        await sendEmail({
+          email: user.email,
+          subject: "Reset Password",
+          message,
+        });
+  
+        res.status(200).json({
+          success: true,
+          message: `Email sent to ${user.email}`,
+        });
+      } catch (error) {
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+        await user.save();
+  
+        res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+  
+  exports.resetPassword = async (req, res) => {
+    try {
+      const resetPasswordToken = crypto
+        .createHash("sha256")
+        .update(req.params.token)
+        .digest("hex");
+  
+      const user = await User.findOne({
+        resetPasswordToken,
+        resetPasswordExpire: { $gt: Date.now() },
+      });
+  
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: "Token is invalid or has expired",
+        });
+      }
+  
+      user.password = req.body.password;
+  
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save();
+  
+      res.status(200).json({
+        success: true,
+        message: "Password Updated",
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+
+  exports.getMyPosts = async (req, res) => {
+    try {
+      const user = await User.findById(req.user._id);
+  
+      const posts = [];
+  
+      for (let i = 0; i < user.posts.length; i++) {
+        const post = await Post.findById(user.posts[i]).populate(
+          "likes comments.user owner"
+        );
+        posts.push(post);
+      }
+  
+      res.status(200).json({
+        success: true,
+        posts,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
+  
+  exports.getUserPosts = async (req, res) => {
+    try {
+      const user = await User.findById(req.params.id);
+  
+      const posts = [];
+  
+      for (let i = 0; i < user.posts.length; i++) {
+        const post = await Post.findById(user.posts[i]).populate(
+          "likes comments.user owner"
+        );
+        posts.push(post);
+      }
+  
+      res.status(200).json({
+        success: true,
+        posts,
       });
     } catch (error) {
       res.status(500).json({
